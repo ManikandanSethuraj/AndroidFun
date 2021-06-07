@@ -1,29 +1,41 @@
 package app.manny.mvvmretrofit;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+import androidx.appcompat.widget.SearchView;
 import androidx.lifecycle.Observer;
 import androidx.lifecycle.ViewModelProvider;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import app.manny.mvvmretrofit.adapters.OnRecipeListener;
+import app.manny.mvvmretrofit.adapters.RecipeRecyclerAdapter;
 import app.manny.mvvmretrofit.models.Recipe;
 import app.manny.mvvmretrofit.requests.ReceipeApi;
 import app.manny.mvvmretrofit.requests.ServiceGenerator;
 import app.manny.mvvmretrofit.requests.responses.RecipeResponse;
 import app.manny.mvvmretrofit.requests.responses.RecipeSearchResponse;
+import app.manny.mvvmretrofit.util.TestingPrint;
+import app.manny.mvvmretrofit.util.VerticalSpacingItemDecorator;
 import app.manny.mvvmretrofit.viewmodels.RecipeListViewModel;
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
 
-public class RecipeListActivity extends BaseActivity {
+public class RecipeListActivity extends BaseActivity implements OnRecipeListener {
 
     private static final String TAG = "RecipeListActivity";
 
     private RecipeListViewModel recipeListViewModel;
+    private RecyclerView recyclerView;
+    private RecipeRecyclerAdapter recipeRecyclerAdapter;
+    private SearchView searchView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,25 +43,108 @@ public class RecipeListActivity extends BaseActivity {
         setContentView(R.layout.activity_recipelist);
 
         recipeListViewModel =new ViewModelProvider(this).get(RecipeListViewModel.class);
+        recyclerView = findViewById(R.id.recipe_recycler_view);
+        searchView = findViewById(R.id.search_view);
+        initRecyclerView();
+        subscribeObservers();
+        initSearchView();
+        if(!recipeListViewModel.isViewingRecipes()){
+            displaySearchCategories();
+        }
+      //  testRecipeApiTwo();
 
-
-        findViewById(R.id.test).setOnClickListener(view -> {
-            Log.d("Logging","1");
-            testRecipeApi();
-           // setProgressBar(progressBar.getVisibility() != View.VISIBLE);
-        });
+//        findViewById(R.id.test).setOnClickListener(view -> {
+//            Log.d("Logging","1");
+//            testRecipeApiTwo();
+//            // testRecipeApi();
+//           // setProgressBar(progressBar.getVisibility() != View.VISIBLE);
+//        });
     }
 
+
+    private void initRecyclerView(){
+        recipeRecyclerAdapter = new RecipeRecyclerAdapter(this);
+        VerticalSpacingItemDecorator verticalSpacingItemDecorator = new VerticalSpacingItemDecorator(30);
+        recyclerView.addItemDecoration(verticalSpacingItemDecorator);
+        recyclerView.setAdapter(recipeRecyclerAdapter);
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        recyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+                                             @Override
+                                             public void onScrollStateChanged(@NonNull RecyclerView recyclerView, int newState) {
+                                                 if (!recyclerView.canScrollVertically(1)){
+                                                       recipeListViewModel.searchNextPage();
+                                                 }
+                                             }
+                                         }
+        );
+
+    }
 
     private void subscribeObservers(){
         recipeListViewModel.getRecipes().observe(this, new Observer<List<Recipe>>() {
             @Override
             public void onChanged(List<Recipe> recipes) {
+                if (recipes != null){
+                    if (recipeListViewModel.isViewingRecipes()){
+                        TestingPrint.print(recipes, "SubRecipes");
+                        recipeListViewModel.setPerformingQuery(false);
+                        recipeRecyclerAdapter.setRecipes(recipes);
 
+                    }
+                }
+
+            }
+        });
+
+        recipeListViewModel.isQueryExhauted().observe(this, new Observer<Boolean>() {
+            @Override
+            public void onChanged(Boolean aBoolean) {
+                if (aBoolean) {
+                    Log.d(TAG, "onChanged: QueryIsExhauted");
+                    recipeRecyclerAdapter.setQueryExhausted();
+                }
             }
         });
     }
 
+    private void displaySearchCategories(){
+        Log.d(TAG, "displaySearchCategories: called.");
+        recipeListViewModel.setIsViewingRecipes(false);
+        recipeRecyclerAdapter.displaySearchCategories();
+    }
+
+
+    private void initSearchView(){
+
+        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String s) {
+                recipeRecyclerAdapter.displayLoading();
+                recipeListViewModel.searchRecipesApi(s,0);
+                searchView.clearFocus();
+                return false;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String s) {
+                return false;
+            }
+        });
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (recipeListViewModel.onBackPressed()){
+            super.onBackPressed();
+        }else {
+            displaySearchCategories();
+        }
+
+    }
+
+    private void testRecipeApiTwo(){
+        recipeListViewModel.searchRecipesApi("chicken",0);
+    }
 
     private void testRecipeSearchApi(){
         ReceipeApi receipeApi = ServiceGenerator.getReceipeApi();
@@ -112,4 +207,19 @@ public class RecipeListActivity extends BaseActivity {
         });
     }
 
+    @Override
+    public void onRecipeClick(int position) {
+        Log.d(TAG, "onRecipeClick: clicked. " + position);
+        Intent intent = new Intent(this, RecipeActivity.class);
+        intent.putExtra("recipe", recipeRecyclerAdapter.getSelectedRecipe(position));
+        startActivity(intent);
+    }
+
+    @Override
+    public void onCategoryClick(String category) {
+        Log.d(TAG, "onCategoryClick: clicked. ");
+        recipeRecyclerAdapter.displayLoading();
+        recipeListViewModel.searchRecipesApi(category, 1);
+        searchView.clearFocus();
+    }
 }
